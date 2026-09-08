@@ -44,3 +44,10 @@ def test_replace_keeps_surrounding_yaml_and_comments():
 def test_replace_refuses_when_block_missing():
     with pytest.raises(ValueError):
         replace_segment_scaling("retarget:\n  w_pos: 1.0\n", {"thumb": [1, 1, 1]}, note="")
+
+
+def test_hands_to_process_expands_both():
+    from calibrate_segment_scaling import hands_to_process
+    assert hands_to_process("left") == ["left"]
+    assert hands_to_process("right") == ["right"]
+    assert hands_to_process("both") == ["left", "right"]

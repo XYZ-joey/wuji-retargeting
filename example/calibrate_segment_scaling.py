@@ -10,6 +10,7 @@ point: confirm in tuning_tool (cyan target vs white robot skeleton) and nudge.
 
 Usage:
     python3 calibrate_segment_scaling.py --hand left                      # print only
+    python3 calibrate_segment_scaling.py --hand both --write             # 양손을 한 번에
     python3 calibrate_segment_scaling.py --hand left --write             # rewrite the yaml block
     python3 calibrate_segment_scaling.py --hand left --urdf <human.urdf> # explicit human model
 """
@@ -81,6 +82,11 @@ def _fk_lengths(urdf: str, wrist: str, frames: dict) -> dict:
     return {f: [float(np.linalg.norm(pos(n) - w) * 1000) for n in names] for f, names in frames.items()}
 
 
+def hands_to_process(hand: str) -> list[str]:
+    """left | right | both → 처리할 손 목록. both 는 왼손 먼저."""
+    return ["left", "right"] if hand == "both" else [hand]
+
+
 def current_user_urdf(hand: str) -> tuple[str, str]:
     from wuji_sdk import SdkManager
     u = dict(SdkManager.instance().current_user())
@@ -94,32 +100,36 @@ def current_user_urdf(hand: str) -> tuple[str, str]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--hand", choices=["left", "right"], required=True)
+    ap.add_argument("--hand", choices=["left", "right", "both"], required=True)
     ap.add_argument("--config", default=None, help="default: config/adaptive_analytical_wuji_glove_wuji_hand_2_<hand>.yaml")
     ap.add_argument("--urdf", default=None, help="human hand URDF (default: current SDK user's calibrated model)")
     ap.add_argument("--write", action="store_true", help="rewrite the segment_scaling block in the config")
     args = ap.parse_args(argv)
 
-    cfg_path = Path(args.config) if args.config else Path(__file__).parent / "config" / f"adaptive_analytical_wuji_glove_wuji_hand_2_{args.hand}.yaml"
-    cfg = yaml.safe_load(cfg_path.read_text())
-    robot_urdf = (cfg_path.parent / cfg["optimizer"]["urdf_path"]).resolve()
-    prefix = cfg["optimizer"].get("link_naming", {}).get("prefix", f"{args.hand[0]}_")
+    if args.urdf and args.hand == "both":
+        raise SystemExit("--urdf 는 한 손에만 쓸 수 있습니다. --hand left 또는 right 로 지정하십시오.")
 
-    human_urdf, who = (args.urdf, Path(args.urdf).name) if args.urdf else current_user_urdf(args.hand)
-    human = _fk_lengths(human_urdf, HUMAN_WRIST, HUMAN_FRAMES)
-    robot = _fk_lengths(str(robot_urdf), ROBOT_WRIST.format(p=prefix),
-                        {f: [n.format(p=prefix) for n in names] for f, names in ROBOT_FRAMES.items()})
-    scaling = scaling_from_lengths(human, robot)
+    for hand in hands_to_process(args.hand):
+        cfg_path = Path(args.config) if args.config else Path(__file__).parent / "config" / f"adaptive_analytical_wuji_glove_wuji_hand_2_{hand}.yaml"
+        cfg = yaml.safe_load(cfg_path.read_text())
+        robot_urdf = (cfg_path.parent / cfg["optimizer"]["urdf_path"]).resolve()
+        prefix = cfg["optimizer"].get("link_naming", {}).get("prefix", f"{hand[0]}_")
 
-    print(f"human: {human_urdf}\nrobot: {robot_urdf}")
-    print(f"{'finger':7s} {'wrist->PIP':>14s} {'wrist->DIP':>14s} {'wrist->TIP':>14s}   segment_scaling (robot/human)")
-    for f in FINGERS:
-        h, r = human[f], robot[f]
-        print(f"{f:7s} " + " ".join(f"{hh:6.0f}/{rr:<6.0f}" for hh, rr in zip(h, r)) + f"   {scaling[f]}")
-    if args.write:
-        new = replace_segment_scaling(cfg_path.read_text(), scaling, note=f"auto from {who} {args.hand}_hand.urdf (calibrate_segment_scaling.py); confirm in tuning_tool")
-        cfg_path.write_text(new)
-        print(f"wrote {cfg_path}")
+        human_urdf, who = (args.urdf, Path(args.urdf).name) if args.urdf else current_user_urdf(hand)
+        human = _fk_lengths(human_urdf, HUMAN_WRIST, HUMAN_FRAMES)
+        robot = _fk_lengths(str(robot_urdf), ROBOT_WRIST.format(p=prefix),
+                            {f: [n.format(p=prefix) for n in names] for f, names in ROBOT_FRAMES.items()})
+        scaling = scaling_from_lengths(human, robot)
+
+        print(f"\n=== {hand} ===\nhuman: {human_urdf}\nrobot: {robot_urdf}")
+        print(f"{'finger':7s} {'wrist->PIP':>14s} {'wrist->DIP':>14s} {'wrist->TIP':>14s}   segment_scaling (robot/human)")
+        for f in FINGERS:
+            h, r = human[f], robot[f]
+            print(f"{f:7s} " + " ".join(f"{hh:6.0f}/{rr:<6.0f}" for hh, rr in zip(h, r)) + f"   {scaling[f]}")
+        if args.write:
+            new = replace_segment_scaling(cfg_path.read_text(), scaling, note=f"auto from {who} {hand}_hand.urdf (calibrate_segment_scaling.py); confirm in tuning_tool")
+            cfg_path.write_text(new)
+            print(f"wrote {cfg_path}")
     return 0
 
 
