@@ -51,6 +51,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from wuji_retargeting import Retargeter
+from wuji_retargeting.viz.upright import flip_hand_upright
 from utils.config_paths import resolve_mjcf_path, qpos_reorder_perm
 from input_devices.visionpro import VisionPro
 from input_devices.mediapipe_replay import MediaPipeReplay
@@ -174,6 +175,7 @@ def run_teleop(
         raise FileNotFoundError(f"MuJoCo model file not found: {mjcf_path}")
 
     model = mujoco.MjModel.from_xml_path(str(mjcf_path))
+    flip_hand_upright(model)   # fingertips up in the viewer (model ships fingers along -z)
     data = mujoco.MjData(model)
 
     # Initialize control signals
@@ -193,7 +195,7 @@ def run_teleop(
     viewer.cam.azimuth = 180
     viewer.cam.elevation = -20
     viewer.cam.distance = 0.5
-    viewer.cam.lookat[:] = [0, 0, 0.05]
+    viewer.cam.lookat[:] = [0, 0, 0.10]   # hand now extends upward
 
     # Load config to get video_input settings if needed (config_file resolved above)
     with open(config_file, "r") as f:
@@ -300,6 +302,13 @@ def run_teleop(
 
         frame_count = 0
         fps_start_time = time.time()
+        # Real-time stepping: the sim used to advance one 2 ms step per ~7 ms loop
+        # (0.29x real time), which made the position actuators look sluggish.
+        # Now each loop steps the sim until sim time catches up with the wall clock.
+        sim_wall0 = None            # wall-clock origin of data.time, set on first valid frame
+        last_pose = None            # identity of the last retargeted input frame
+        qpos = None
+        max_steps_per_loop = 10     # cap the catch-up so a hiccup cannot stall the loop
 
         while viewer.is_running():
             # Get finger data
@@ -327,30 +336,42 @@ def run_teleop(
                     ),
                 })
 
-            # Retarget to joint angles
-            qpos = retargeter.retarget(fingers_pose)  # (20,)
+            # Retarget only when the input device handed us a new frame (the glove
+            # device returns the same cached array otherwise); keep stepping the sim.
+            if fingers_pose is not last_pose:
+                last_pose = fingers_pose
+                qpos = retargeter.retarget(fingers_pose)  # (20,)
+            else:
+                time.sleep(0.0005)   # nothing new: avoid a hot spin
 
             # FPS counter
             frame_count += 1
             if frame_count % 100 == 0:
                 elapsed = time.time() - fps_start_time
                 fps = frame_count / elapsed
-                print(f"FPS: {fps:.1f}")
+                ratio = data.time / (time.perf_counter() - sim_wall0) if sim_wall0 else 0.0
+                print(f"FPS: {fps:.1f}  sim/wall: {ratio:.2f}")
 
             # Set control signals (remap URDF qpos order -> actuator order)
-            if _qpos_perm is not None:
-                qpos = qpos[_qpos_perm]
-            if len(qpos) == model.nu:
-                data.ctrl[:] = qpos
-            else:
-                min_len = min(len(qpos), model.nu)
-                data.ctrl[:min_len] = qpos[:min_len]
+            if qpos is not None:
+                q = qpos[_qpos_perm] if _qpos_perm is not None else qpos
+                if len(q) == model.nu:
+                    data.ctrl[:] = q
+                else:
+                    min_len = min(len(q), model.nu)
+                    data.ctrl[:min_len] = q[:min_len]
 
-            # Step simulation
-            mujoco.mj_step(model, data)
+            # Step simulation up to the wall clock (capped), no fixed sleep
+            now = time.perf_counter()
+            if sim_wall0 is None:
+                sim_wall0 = now - data.time
+            n_steps = 0
+            while data.time < now - sim_wall0 and n_steps < max_steps_per_loop:
+                mujoco.mj_step(model, data)
+                n_steps += 1
+            if n_steps >= max_steps_per_loop:
+                sim_wall0 = now - data.time     # drop the backlog instead of chasing it
             viewer.sync()
-
-            time.sleep(model.opt.timestep)
 
     except KeyboardInterrupt:
         print("\nStopping controller...")

@@ -45,7 +45,7 @@ camera:
   azimuth: 135
   elevation: -20
   distance: 0.5
-  lookat: [0.0, 0.0, 0.05]
+  lookat: [0.0, 0.0, 0.10]   # 손이 위로 뻗으므로 조금 올림
 
 # === HUD (text overlay) ===
 hud:

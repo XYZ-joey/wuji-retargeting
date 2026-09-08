@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 import mujoco
+from wuji_retargeting.viz.upright import flip_hand_upright
 import mujoco.viewer
 import numpy as np
 import yaml
@@ -136,6 +137,7 @@ class TuningViewer:
             raise FileNotFoundError(f"MuJoCo model not found: {mjcf_path}")
 
         self.model = mujoco.MjModel.from_xml_path(str(mjcf_path))
+        flip_hand_upright(self.model)   # fingertips up in the viewer
         self.data = mujoco.MjData(self.model)
 
         # Make hand mesh semi-transparent
