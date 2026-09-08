@@ -12,6 +12,43 @@ from .base import BaseOptimizer, M_TO_CM, TimingStats, huber_loss_np, huber_loss
 from ..robot import RobotWrapper
 
 
+def apply_contact_offset(tip_vectors: np.ndarray, alphas: np.ndarray,
+                         alpha_max: float, offset_cm: float) -> np.ndarray:
+    """Pull pinching fingertip targets toward the thumb to close the sensor-to-skin gap.
+
+    Glove fingertip keypoints are bone-end points (Wuji SDK ``*_finger_tip``), about
+    5 mm inside each fingertip pad, so two fingertips that physically touch are
+    reported ~1 cm apart. Each finger with pinch weight ``alphas[i]`` moves toward
+    the thumb by ``offset_cm * alphas[i] / alpha_max / 2``; the thumb moves the same
+    amount toward the finger with the largest alpha. Never overshoots past contact.
+    ``offset_cm <= 0`` disables it.
+    """
+    if offset_cm <= 0.0:
+        return tip_vectors
+    out = np.array(tip_vectors, dtype=np.float64, copy=True)
+    thumb = tip_vectors[0]
+    scale = max(float(alpha_max), 1e-8)
+    best_i, best_w = 0, 0.0
+    for i in range(1, 5):
+        w = float(alphas[i]) / scale
+        if w <= 0.0:
+            continue
+        v = tip_vectors[i] - thumb
+        d = float(np.linalg.norm(v))
+        if d < 1e-9:
+            continue
+        shift = min(offset_cm * w, d) / 2.0
+        out[i] = tip_vectors[i] - shift * (v / d)
+        if w > best_w:
+            best_i, best_w = i, w
+    if best_i:
+        v = tip_vectors[best_i] - thumb
+        d = float(np.linalg.norm(v))
+        shift = min(offset_cm * best_w, d) / 2.0
+        out[0] = thumb + shift * (v / d)
+    return out
+
+
 class AdaptiveOptimizerAnalytical(BaseOptimizer):
     """Adaptive optimizer with analytical (hand-written) gradients.
 
@@ -70,6 +107,10 @@ class AdaptiveOptimizerAnalytical(BaseOptimizer):
             pinch_config.get('ring', {}).get('d2', 4.0),
             pinch_config.get('pinky', {}).get('d2', 4.0),
         ], dtype=np.float64)
+        # Upper clip of the pinch weight (upstream hard-coded 0.7) and the
+        # sensor-to-skin gap closed when pinching (0 = upstream behaviour).
+        self.pinch_alpha_max = float(retarget_config.get('pinch_alpha_max', 0.7))
+        self.contact_offset_cm = float(retarget_config.get('contact_offset_cm', 0.0))
 
         # link1 (finger-plane) names come from BaseOptimizer._resolve_link_names,
         # so a custom optimizer.link_naming applies to them too.
@@ -138,7 +179,7 @@ class AdaptiveOptimizerAnalytical(BaseOptimizer):
         thumb_tip = mediapipe_keypoints[self.MP_TIP_INDICES[0]]
         finger_tips = mediapipe_keypoints[self.MP_TIP_INDICES[1:]]
         distances = np.linalg.norm(finger_tips - thumb_tip, axis=1) * M_TO_CM
-        alphas_4 = np.clip((self.d2 - distances) / (self.d2 - self.d1 + 1e-8), 0.0, 0.7)
+        alphas_4 = np.clip((self.d2 - distances) / (self.d2 - self.d1 + 1e-8), 0.0, self.pinch_alpha_max)
         alpha_thumb = np.max(alphas_4)
         return np.concatenate([[alpha_thumb], alphas_4])
 
@@ -162,6 +203,9 @@ class AdaptiveOptimizerAnalytical(BaseOptimizer):
 
         alphas = self._compute_pinch_alpha(mediapipe_keypoints)
         target_tip_vectors = self._compute_tip_vectors(mediapipe_keypoints, self.scaling)
+        target_tip_vectors = apply_contact_offset(
+            target_tip_vectors, alphas, self.pinch_alpha_max, self.contact_offset_cm
+        )
         target_tip_dirs = self._compute_tip_dirs(mediapipe_keypoints)
         target_full_hand_vectors = self._compute_full_hand_vectors(
             mediapipe_keypoints, self.segment_scaling
@@ -192,6 +236,9 @@ class AdaptiveOptimizerAnalytical(BaseOptimizer):
         """Compute cost for given joint angles."""
         alphas = self._compute_pinch_alpha(mediapipe_keypoints)
         target_tip_vectors = self._compute_tip_vectors(mediapipe_keypoints, self.scaling)
+        target_tip_vectors = apply_contact_offset(
+            target_tip_vectors, alphas, self.pinch_alpha_max, self.contact_offset_cm
+        )
         target_tip_dirs = self._compute_tip_dirs(mediapipe_keypoints)
         target_full_hand_vectors = self._compute_full_hand_vectors(
             mediapipe_keypoints, self.segment_scaling

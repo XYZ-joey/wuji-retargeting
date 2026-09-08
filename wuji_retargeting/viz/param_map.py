@@ -55,6 +55,17 @@ PARAM_FINGER_MAP = {
         "effect": "Increase -> motion is smoother/more stable; Decrease -> tracks hand more closely",
     },
 
+    "pinch_alpha_max": {
+        "fingers": ["all"],
+        "desc": "Upper clip of the pinch weight (0.0-1.0)",
+        "effect": "Increase -> a pinch fully overrides hand-shape matching; Decrease -> keeps more hand shape while pinching",
+    },
+    "contact_offset_cm": {
+        "fingers": ["all"],
+        "desc": "Sensor-to-skin gap closed when pinching (cm)",
+        "effect": "Increase -> pinching fingertips are pulled closer together; 0 disables",
+    },
+
     # === Pinch thresholds ===
     "pinch_thresholds.index": {
         "fingers": ["thumb", "index"],

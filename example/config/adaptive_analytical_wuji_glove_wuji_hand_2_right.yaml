@@ -43,7 +43,7 @@ retarget:
   soft_min: 0.0          # joint angle threshold (rad); 0 = no negative angles allowed
   w_couple: 0.1          # DIP pulled toward couple_ratio * PIP per finger
   couple_ratio: 0.7      # biomechanical (DIP curls ~70% of PIP)
-  lp_alpha: 0.2
+  lp_alpha: 0.5           # 0.2 gave a ~31 ms filter lag at 145 Hz; 0.5 is ~10 ms with a little more jitter
 
   # Per-segment scaling of the retargeted finger lengths (per finger: proximal,
   # middle, distal). Tune per hand if the fingertips over- or under-reach the
@@ -67,6 +67,8 @@ retarget:
     middle: { d1: 2.0, d2: 4.0 }
     ring:   { d1: 2.0, d2: 4.0 }
     pinky:  { d1: 2.0, d2: 4.0 }
+  pinch_alpha_max: 1.0     # upstream clips the pinch weight at 0.7; 1.0 lets a pinch fully win over hand shape
+  contact_offset_cm: 1.0   # glove fingertip keypoints are bone ends ~5 mm inside the pad: a real touch reads ~1 cm apart
   mediapipe_rotation:
     x: 0.0
     y: 180.0

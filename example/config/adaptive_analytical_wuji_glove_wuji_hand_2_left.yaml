@@ -43,7 +43,7 @@ retarget:
   soft_min: 0.0          # joint angle threshold (rad); 0 = no negative angles allowed
   w_couple: 0.1          # DIP pulled toward couple_ratio * PIP per finger
   couple_ratio: 0.7      # biomechanical (DIP curls ~70% of PIP)
-  lp_alpha: 0.2
+  lp_alpha: 0.5           # 0.2 gave a ~31 ms filter lag at 145 Hz; 0.5 is ~10 ms with a little more jitter
 
   # Per-segment scaling of the retargeted finger lengths (per finger: proximal,
   # middle, distal). Tune per hand if the fingertips over- or under-reach the
@@ -55,18 +55,20 @@ retarget:
   #   ring:   [0.9, 0.9, 0.9]
   #   pinky:  [1.0, 1.0, 1.0]
 
-  segment_scaling:
-    thumb:  [1.0, 1.0, 1.0]
-    index:  [1.0, 1.0, 1.0]
-    middle: [1.0, 1.0, 1.0]
-    ring:   [1.0, 1.0, 1.0]
-    pinky:  [1.0, 1.0, 1.0]
+  segment_scaling:   # auto from xyz_joey left_hand.urdf (calibrate_segment_scaling.py); confirm in tuning_tool
+    thumb:  [1.00, 0.95, 0.94]
+    index:  [0.93, 0.94, 0.99]
+    middle: [0.86, 0.94, 0.92]
+    ring:   [0.83, 0.93, 0.89]
+    pinky:  [0.99, 0.98, 0.98]
 
   pinch_thresholds:
     index:  { d1: 2.0, d2: 4.0 }
     middle: { d1: 2.0, d2: 4.0 }
     ring:   { d1: 2.0, d2: 4.0 }
     pinky:  { d1: 2.0, d2: 4.0 }
+  pinch_alpha_max: 1.0     # upstream clips the pinch weight at 0.7; 1.0 lets a pinch fully win over hand shape
+  contact_offset_cm: 1.0   # glove fingertip keypoints are bone ends ~5 mm inside the pad: a real touch reads ~1 cm apart
   # The left hand's root frame and calibration may differ from the right (often a
   # mirrored z); tune mediapipe_rotation and the offsets live in tuning_tool.
   mediapipe_rotation:
